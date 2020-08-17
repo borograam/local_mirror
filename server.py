@@ -1,3 +1,6 @@
+"""
+Local mirror of some site with emoji injection after each 6-letter word.
+"""
 import argparse
 import logging
 import re
@@ -9,6 +12,7 @@ from bs4 import BeautifulSoup, NavigableString
 
 
 class Mirror:
+    """ Each object is independent and manages a separate server """
     def __init__(self, port: int, proto: str, host: str, emoji: str):
         self.port = port
         self.proto = proto
@@ -18,50 +22,62 @@ class Mirror:
 
     @staticmethod
     def emoji_generator(emoji: str) -> Iterator[str]:
+        """ returns infinite iterator of chars from `emoji` string """
         while True:
-            for s in emoji:
-                yield s
+            for char in emoji:
+                yield char
 
     @property
     def emoji(self):
+        """ returns the next emoji """
         return next(self._emoji_iterator)
 
-    def start(self) -> NoReturn:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s: %(levelname)s: %(message)s")
+    def start(self) -> None:
+        """ start to serve the HTTP server """
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s: %(levelname)s: %(message)s"
+        )
         server = ThreadingHTTPServer(('', self.port), self.get_handler())
-        logging.info(f'Start server on {self.port} port. Use ctrl+C to stop it.')
+        logging.info('Start server on %d port. Use ctrl+C to stop it.', self.port)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         server.server_close()
-        logging.info(f'Server stopped')
+        logging.info('Server stopped')
 
     def get_handler(self):
+        """ define and return Handler class which need to use in HTTPServer """
         mirror = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                logging.info(f"GET {self.path}")
-                r = mirror.get_from_host(self.path, str(self.headers))
-                logging.info(f'requested {r.url}, status:{r.status_code}')
+            """ this will be used in HTTPServer """
+            def do_GET(self):  # pylint: disable=C0103
+                """ handle GET request """
+                logging.info("GET %s", self.path)
+                response = mirror.get_from_host(self.path, str(self.headers))
+                logging.info('requested %s, status:%s', response.url, response.status_code)
 
-                content = r.content
-                content_type = r.headers.get('content-type', '')
+                content = response.content
+                content_type = response.headers.get('content-type', '')
                 if 'text/html' in content_type:
                     encoding = 'utf-8'
                     if 'charset' in content_type:
                         encoding = content_type.split('charset=')[1]
                     content = mirror.modify_html(content, encoding=encoding)
-                    logging.info(f'modified {r.url}')
+                    logging.info('modified %s', response.url)
 
-                self.send(r.status_code, r.headers, content)
-                logging.info(f'sent {self.path} to client')
+                self.send(response.status_code, response.headers, content)
+                logging.info('sent %s to client', self.path)
 
             def send(self, code: int, headers, content: bytes) -> NoReturn:
+                """ send response back to user """
                 self.send_response(code)
                 for header in headers:
-                    if header.lower() not in ['server', 'date', 'transfer-encoding', 'content-encoding', 'connection']:
+                    if header.lower() not in [
+                            'server', 'date', 'transfer-encoding',
+                            'content-encoding', 'connection']:
                         self.send_header(header, headers[header])
 
                 self.end_headers()
@@ -70,16 +86,21 @@ class Mirror:
         return Handler
 
     def get_from_host(self, path: str, headers: str) -> requests.Response:
+        """ request `path` page from `self.host` """
         header_dict = {}
-        for s in headers.rstrip().split('\n'):
-            key, value = s.split(': ')
+        for header_line in headers.rstrip().split('\n'):
+            key, value = header_line.split(': ')
             if key.lower() == 'host':
                 continue
             header_dict[key] = value
 
-        return requests.get(f'{self.proto}{self.host}{path}', headers=header_dict)
+        return requests.get(
+            f'{self.proto}{self.host}{path}',
+            headers=header_dict
+        )
 
     def modify_html(self, content: bytes, encoding: str) -> bytes:
+        """ perform some html modifications """
         soup = BeautifulSoup(content, 'html5lib', from_encoding=encoding)
 
         # change a[href] absolute paths to relative
@@ -99,6 +120,8 @@ class Mirror:
             return match.group(0) + self.emoji
         word_re = re.compile(r'\b[a-zA-Zа-яА-ЯёЁ]{6}\b')
         for tag in soup(string=word_re):
+            # I need to sure tag is NavigableString but not its subclass
+            # pylint: disable=unidiomatic-typecheck
             if type(tag) == NavigableString and tag.parent.name not in ['script', 'style']:
                 tag.replace_with(word_re.sub(emoji_word, tag))
 
@@ -112,8 +135,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', default=9000, type=int, help='Port to listen. Default to 9000')
     parser.add_argument('--host', default='lifehacker.ru', type=str,
                         help='What the site will be displayed. Default to lifehacker.ru')
-    parser.add_argument('--http', dest='proto', action='store_const', const='http://', default='https://',
-                        help='Send http instead of https')
+    parser.add_argument('--http', dest='proto', action='store_const', const='http://',
+                        default='https://', help='Send http instead of https')
 
     args = parser.parse_args()
     Mirror(**vars(args)).start()
