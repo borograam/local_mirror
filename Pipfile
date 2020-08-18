@@ -11,6 +11,8 @@ ipython = "*"
 bs4 = "*"
 html5lib = "*"
 pylint = "*"
+gunicorn = "*"
+gevent = "*"
 
 [requires]
 python_version = "3.8"

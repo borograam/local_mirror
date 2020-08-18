@@ -1,11 +1,8 @@
 """ Mirror unit tests """
 import unittest
 from typing import Iterable, Callable, Generator
-from http.server import BaseHTTPRequestHandler
 
-import requests
-
-from server import Mirror
+from mirror import Mirror
 
 
 class MirrorEmojiTestCase(unittest.TestCase):
@@ -13,64 +10,30 @@ class MirrorEmojiTestCase(unittest.TestCase):
     def test_one_emoji(self):
         """ test for one emoji in `mirror` """
         skull = '\U0001f480'
-        mirror = Mirror(9000, 'https://', 'lifehacker.ru', skull)
+        mirror = Mirror('https://', 'lifehacker.ru', skull)
         for _ in range(5):
             self.assertEqual(mirror.emoji, skull)
 
     def test_five_emoji(self):
         """ test for several emoji in `mirror` """
         string = '\U0001f480\U0001f60d\U0001f9a5\U0001F453\u3299'
-        mirror = Mirror(9000, 'https://', 'lifehacker.ru', string)
+        mirror = Mirror('https://', 'lifehacker.ru', string)
         for _ in range(5):
             for char in string:
                 self.assertEqual(mirror.emoji, char)
 
-
-class MirrorGetHandlerTestCase(unittest.TestCase):
-    """ test get_handler method """
-    def test_simple(self):
-        """ look at the type of returned class """
-        mirror = Mirror(9000, 'https://', 'lifehacker.ru', "1")
-        handler = mirror.get_handler()
-        self.assertEqual(handler.__name__, 'Handler')
-        self.assertEqual(handler.__base__, BaseHTTPRequestHandler)
-
-
-class MirrorGetFromHostTestCase(unittest.TestCase):
-    """ test Mirror's get_from_host method """
-    def setUp(self) -> None:
-        self.mirror = Mirror(9000, 'https://', 'httpbin.org', '\U0001f480')
-
-    def test_host_ignore(self):
-        """ ensure client's header "Host" will be ignored """
-        host = 'yandex.ru'
-        headers = f'Host: {host}\n\n'
-        try:
-            response = self.mirror.get_from_host(path='/get', headers=headers)
-        except requests.ConnectionError:
-            raise unittest.SkipTest("connection error to httpbin.org")
-        actual_headers = response.json().get('headers')
-        self.assertNotEqual(actual_headers.get('Host'), host)
-
-    def test_usage(self):
-        """ ensure some client's headers passed through get_from_host """
-        accept = 'application/json'
-        accept_language = 'en-US'
-        headers = f'Accept: {accept}\nAccept-Language: {accept_language}\n\n'
-        try:
-            response = self.mirror.get_from_host(path='/get', headers=headers)
-        except requests.ConnectionError:
-            raise unittest.SkipTest("connection error to httpbin.org")
-        actual_headers = response.json().get('headers')
-        self.assertEqual(actual_headers.get('Accept'), accept)
-        self.assertEqual(actual_headers.get('Accept-Language'), accept_language)
+    def test_no_emoji(self):
+        """ test for no emoji in `mirror` """
+        mirror = Mirror('https://', 'ya.ru', '')
+        for _ in range(5):
+            self.assertEqual(mirror.emoji, '')
 
 
 class MirrorModifyHTMLTestCase(unittest.TestCase):
     """ test Mirror's modify_html method """
     def setUp(self) -> None:
         self.emojis = '\U0001f480\U0001f60d\U0001f9a5\U0001F453\u3299'
-        self.mirror = Mirror(9000, 'https://', 'ya.ru', self.emojis)
+        self.mirror = Mirror('https://', 'ya.ru', self.emojis)
         self.emoji_iterator = Mirror.emoji_generator(emoji=self.emojis)
 
     @staticmethod

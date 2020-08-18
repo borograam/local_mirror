@@ -1,36 +1,17 @@
-"""
-Local mirror of some site with emoji injection after each 6-letter word.
-"""
+""" local http.server.ThreadingHTTPServer to run mirror """
 import argparse
 import logging
-import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import NoReturn, Iterator
+from typing import NoReturn
 
-import requests
-from bs4 import BeautifulSoup, NavigableString
+from mirror import Mirror
 
 
-class Mirror:
-    """ Each object is independent and manages a separate server """
+class ThreadingHTTPServerMirror(Mirror):
+    """ Add ThreadingHTTPServer usage in Mirror class """
     def __init__(self, port: int, proto: str, host: str, emoji: str):
+        super().__init__(proto=proto, host=host, emoji=emoji)
         self.port = port
-        self.proto = proto
-        self.host = host
-
-        self._emoji_iterator = Mirror.emoji_generator(emoji)
-
-    @staticmethod
-    def emoji_generator(emoji: str) -> Iterator[str]:
-        """ returns infinite iterator of chars from `emoji` string """
-        while True:
-            for char in emoji:
-                yield char
-
-    @property
-    def emoji(self):
-        """ returns the next emoji """
-        return next(self._emoji_iterator)
 
     def start(self) -> None:
         """ start to serve the HTTP server """
@@ -56,7 +37,14 @@ class Mirror:
             def do_GET(self):  # pylint: disable=C0103
                 """ handle GET request """
                 logging.info("GET %s", self.path)
-                response = mirror.get_from_host(self.path, str(self.headers))
+                headers = {}
+                for header_line in str(self.headers).rstrip().split('\n'):
+                    key, value = header_line.split(': ')
+                    if key.lower() == 'host':
+                        continue
+                    headers[key] = value
+
+                response = mirror.request_host('get', self.path, headers=headers)
                 logging.info('requested %s, status:%s', response.url, response.status_code)
 
                 content = response.content
@@ -85,48 +73,6 @@ class Mirror:
 
         return Handler
 
-    def get_from_host(self, path: str, headers: str) -> requests.Response:
-        """ request `path` page from `self.host` """
-        header_dict = {}
-        for header_line in headers.rstrip().split('\n'):
-            key, value = header_line.split(': ')
-            if key.lower() == 'host':
-                continue
-            header_dict[key] = value
-
-        return requests.get(
-            f'{self.proto}{self.host}{path}',
-            headers=header_dict
-        )
-
-    def modify_html(self, content: bytes, encoding: str) -> bytes:
-        """ perform some html modifications """
-        soup = BeautifulSoup(content, 'html5lib', from_encoding=encoding)
-
-        # change a[href] absolute paths to relative
-        host_for_re = self.host.replace('.', r'\.')
-        domain_re = re.compile(f'^(?:https?://)?{host_for_re}')
-        for tag in soup('a', href=domain_re):
-            tag['href'] = domain_re.sub('', tag['href'])
-
-        # change [src] and link[href] paths to relative
-        for tag in soup(src=domain_re):
-            tag['src'] = domain_re.sub('', tag['src'])
-        for tag in soup('link', href=domain_re):
-            tag['href'] = domain_re.sub('', tag['href'])
-
-        # inject emoji
-        def emoji_word(match):
-            return match.group(0) + self.emoji
-        word_re = re.compile(r'\b[a-zA-Zа-яА-ЯёЁ]{6}\b')
-        for tag in soup(string=word_re):
-            # I need to sure tag is NavigableString but not its subclass
-            # pylint: disable=unidiomatic-typecheck
-            if type(tag) == NavigableString and tag.parent.name not in ['script', 'style']:
-                tag.replace_with(word_re.sub(emoji_word, tag))
-
-        return soup.encode(encoding=encoding)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -139,4 +85,4 @@ if __name__ == "__main__":
                         default='https://', help='Send http instead of https')
 
     args = parser.parse_args()
-    Mirror(**vars(args)).start()
+    ThreadingHTTPServerMirror(**vars(args)).start()
